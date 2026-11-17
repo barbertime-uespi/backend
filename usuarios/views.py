@@ -71,3 +71,30 @@ class BarbeiroListView(generics.ListAPIView):
     queryset = Barbeiro.objects.filter(ativo=True).order_by('nome')
     serializer_class = BarbeiroSerializer
     permission_classes = [AllowAny]
+
+
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+class LogoutView(APIView):
+    """RF02: logout real invalidando o refresh token (blacklist)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        refresh = request.data.get('refresh')
+        if not refresh:
+            return Response(
+                {'detail': 'O campo "refresh" é obrigatório.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            token = RefreshToken(refresh)
+            token.blacklist()
+        except TokenError:
+            return Response(
+                {'detail': 'Token inválido ou expirado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(status=status.HTTP_205_RESET_CONTENT)
