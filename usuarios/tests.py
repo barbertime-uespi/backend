@@ -1,6 +1,10 @@
 from django.contrib.auth import get_user_model
+from django.test import TestCase
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from usuarios.models import Barbeiro
+from usuarios.serializers import RegistroBarbeiroSerializer
 
 User = get_user_model()
 
@@ -32,12 +36,6 @@ class LogoutTests(APITestCase):
     def test_logout_exige_autenticacao(self):
         resp = self.client.post('/api/token/logout/', {}, format='json')
         self.assertEqual(resp.status_code, 401)
-
-
-from django.test import TestCase
-
-from usuarios.models import Barbeiro
-from usuarios.serializers import RegistroBarbeiroSerializer
 
 
 class RegistroBarbeiroSerializerTests(TestCase):
