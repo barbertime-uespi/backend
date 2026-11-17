@@ -56,3 +56,37 @@ class BarbeiroSerializer(serializers.ModelSerializer):
     class Meta:
         model = Barbeiro
         fields = ['id', 'username', 'nome', 'email', 'telefone', 'ativo']
+
+
+class RegistroBarbeiroSerializer(serializers.ModelSerializer):
+    """US03/RF03: cria o User do Django e o perfil Barbeiro vinculado."""
+
+    username = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=6)
+
+    class Meta:
+        model = Barbeiro
+        fields = ['id', 'username', 'password', 'nome', 'email', 'telefone', 'ativo']
+
+    def validate_username(self, value):
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError('Este nome de usuário já está em uso.')
+        return value
+
+    def validate_email(self, value):
+        if Barbeiro.objects.filter(email=value).exists() or User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('Este e-mail já está cadastrado.')
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        username = validated_data.pop('username')
+        password = validated_data.pop('password')
+        email = validated_data.get('email', '')
+
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+        )
+        return Barbeiro.objects.create(user=user, **validated_data)
