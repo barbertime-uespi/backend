@@ -1,12 +1,15 @@
-from rest_framework import generics, status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework import generics, status, viewsets
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Barbeiro, Cliente
 from .serializers import (
     BarbeiroSerializer,
     ClienteSerializer,
+    RegistroBarbeiroSerializer,
     RegistroClienteSerializer,
 )
 
@@ -73,10 +76,6 @@ class BarbeiroListView(generics.ListAPIView):
     permission_classes = [AllowAny]
 
 
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import RefreshToken
-
-
 class LogoutView(APIView):
     """RF02: logout real invalidando o refresh token (blacklist)."""
 
@@ -98,3 +97,20 @@ class LogoutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_205_RESET_CONTENT)
+
+
+class BarbeiroViewSet(viewsets.ModelViewSet):
+    """US03/RF03: CRUD de barbeiros restrito ao administrador."""
+
+    queryset = Barbeiro.objects.all().order_by('nome')
+    permission_classes = [IsAdminUser]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return RegistroBarbeiroSerializer
+        return BarbeiroSerializer
+
+    def perform_destroy(self, instance):
+        # Soft delete: preserva histórico e FKs de agendamentos.
+        instance.ativo = False
+        instance.save(update_fields=['ativo'])

@@ -67,3 +67,53 @@ class RegistroBarbeiroSerializerTests(TestCase):
         })
         self.assertFalse(serializer.is_valid())
         self.assertIn('username', serializer.errors)
+
+
+class BarbeiroAdminAPITests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='admin', password='x', is_staff=True
+        )
+        self.cliente_user = User.objects.create_user(username='cli', password='x')
+
+    def test_admin_cria_barbeiro(self):
+        self.client.force_authenticate(user=self.admin)
+        data = {
+            'username': 'barb1', 'password': 'senha123', 'nome': 'Rob',
+            'email': 'rob@ex.com', 'telefone': '11988887777', 'ativo': True,
+        }
+        resp = self.client.post('/api/admin/barbeiros/', data, format='json')
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(User.objects.filter(username='barb1').exists())
+        self.assertTrue(Barbeiro.objects.filter(nome='Rob').exists())
+
+    def test_cliente_nao_acessa_gestao(self):
+        self.client.force_authenticate(user=self.cliente_user)
+        resp = self.client.get('/api/admin/barbeiros/')
+        self.assertEqual(resp.status_code, 403)
+
+    def test_nao_autenticado_recebe_401(self):
+        resp = self.client.get('/api/admin/barbeiros/')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_delete_faz_soft_delete(self):
+        self.client.force_authenticate(user=self.admin)
+        user = User.objects.create_user(username='barb2', password='x')
+        barbeiro = Barbeiro.objects.create(
+            user=user, nome='Ana', email='ana@ex.com', telefone='1', ativo=True
+        )
+        resp = self.client.delete(f'/api/admin/barbeiros/{barbeiro.id}/')
+        self.assertEqual(resp.status_code, 204)
+        barbeiro.refresh_from_db()
+        self.assertFalse(barbeiro.ativo)
+
+    def test_admin_lista_inclui_inativos(self):
+        self.client.force_authenticate(user=self.admin)
+        user = User.objects.create_user(username='barb3', password='x')
+        Barbeiro.objects.create(
+            user=user, nome='Zé', email='ze@ex.com', telefone='1', ativo=False
+        )
+        resp = self.client.get('/api/admin/barbeiros/')
+        self.assertEqual(resp.status_code, 200)
+        nomes = [b['nome'] for b in resp.json()]
+        self.assertIn('Zé', nomes)
