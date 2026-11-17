@@ -29,7 +29,7 @@ class RegistroClienteView(generics.CreateAPIView):
 
 
 class PerfilUsuarioView(APIView):
-    """Retorna ou atualiza os dados do usuário logado (Cliente ou Barbeiro)."""
+    """Retorna ou atualiza os dados do usuário logado."""
 
     permission_classes = [IsAuthenticated]
 
