@@ -1,19 +1,9 @@
-from rest_framework import generics, permissions
-from .models import Cliente
-from .serializers import RegistroClienteSerializer
-from .models import Barbeiro
+from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-
-class RegistroClienteView(generics.CreateAPIView):
-    """RF01 / US01: Cadastro público de clientes."""
-    queryset = Cliente.objects.all()
-    serializer_class = RegistroClienteSerializer
-    permission_classes = [permissions.AllowAny]
-    
-
+from .models import Barbeiro, Cliente
 from .serializers import (
     BarbeiroSerializer,
     ClienteSerializer,
@@ -22,8 +12,9 @@ from .serializers import (
 
 
 class RegistroClienteView(generics.CreateAPIView):
-    """Endpoint público para cadastro de novos clientes."""
+    """RF01 / US01: Cadastro público de clientes."""
 
+    queryset = Cliente.objects.all()
     serializer_class = RegistroClienteSerializer
     permission_classes = [AllowAny]
 
