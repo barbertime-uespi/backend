@@ -8,8 +8,7 @@ Framework**, autenticação **JWT** e banco **SQLite**.
 
 ## Status
 
-**Etapa 1 — Estrutura geral (scaffold).** Projeto, apps, models e autenticação JWT
-configurados. Serializers, views, permissões e regras de negócio virão nas próximas etapas.
+**Backend — serviços e CORS.** CRUD de serviços com escrita restrita a administradores, consulta pública apenas de serviços ativos, desativação lógica, testes automatizados e CORS configurado para o frontend local.
 
 ## Arquitetura
 
@@ -34,6 +33,9 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 # 2. Instalar dependências
 pip install -r requirements.txt
 
+# 2.1 Executar os testes automatizados
+python manage.py test
+
 # 3. Aplicar migrations
 python manage.py migrate
 
@@ -48,10 +50,17 @@ python manage.py runserver
 - Obter token JWT: `POST /api/token/` com `username` e `password`
 - Renovar token: `POST /api/token/refresh/`
 
-## Próximas etapas
+## Serviços e permissões
 
-- Serializers e ViewSets por entidade
-- Permissões por papel (matriz da especificação)
-- Validação de conflito de horário (RN01–RN05)
-- Consulta de horários disponíveis (RF06)
-- Testes automatizados
+- `GET /api/servicos/` e `GET /api/servicos/{id}/` são públicos e retornam somente serviços ativos.
+- `POST`, `PUT`, `PATCH` e `DELETE` exigem usuário administrador (`is_staff=True`).
+- `DELETE /api/servicos/{id}/` realiza desativação lógica, preservando o registro.
+- Administradores podem consultar também os serviços inativos.
+
+## CORS
+
+As origens `http://localhost:5173` (Vite) e `http://localhost:3000` estão liberadas para desenvolvimento. Inclua a origem real do frontend em `CORS_ALLOWED_ORIGINS` ao mudar o endereço.
+
+## Testes
+
+Execute `python manage.py test` na raiz do projeto para rodar os testes dos aplicativos.
