@@ -1,25 +1,24 @@
 from datetime import datetime, time, timedelta
-from django.db.models import Q
+
+from django.utils import timezone
 from rest_framework import permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from usuarios.models import Barbeiro, Cliente
 from .models import Agendamento
 from .serializers import AgendamentoSerializer
 
 
 def _eh_admin(user):
-    return bool(getattr(user, "is_staff", False) or getattr(user, "is_superuser", False))
-
-
-def _usuario_do_perfil(perfil):
-    if perfil is None:
-        return None
-    return getattr(perfil, "user", None) or getattr(perfil, "usuario", None)
+    return bool(
+        getattr(user, "is_staff", False) or getattr(user, "is_superuser", False)
+    )
 
 
 class HorariosDisponiveisView(APIView):
-    """RF06: Consulta horarios livres em blocos de 30 minutos."""
+    """RF06: consulta horários livres em blocos de 30 minutos."""
 
     permission_classes = [permissions.AllowAny]
 
@@ -38,15 +37,37 @@ class HorariosDisponiveisView(APIView):
             )
 
         try:
-            data_consulta = datetime.strptime(data_str, "%Y-%m-%d").date()
-        except ValueError:
+            barbeiro_id_int = int(barbeiro_id)
+            if barbeiro_id_int <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
             return Response(
-                {"detail": "Formato de data invalido. Use YYYY-MM-DD."},
+                {"barbeiro_id": "Informe um identificador numérico válido."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            data_consulta = datetime.strptime(data_str, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            return Response(
+                {"data": "Formato de data inválido. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not Barbeiro.objects.filter(pk=barbeiro_id_int, ativo=True).exists():
+            return Response(
+                {"detail": "Barbeiro não encontrado ou inativo."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if data_consulta < timezone.localdate():
+            return Response(
+                {"data": "Não é possível consultar horários de uma data passada."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         agendamentos_ocupados = Agendamento.objects.filter(
-            barbeiro_id=barbeiro_id,
+            barbeiro_id=barbeiro_id_int,
             data=data_consulta,
         ).exclude(status=Agendamento.Status.CANCELADO)
 
@@ -58,20 +79,24 @@ class HorariosDisponiveisView(APIView):
         while atual + passo <= fim_expediente:
             inicio_slot = atual.time()
             fim_slot = (atual + passo).time()
-
             conflita = agendamentos_ocupados.filter(
                 horario_inicio__lt=fim_slot,
                 horario_fim__gt=inicio_slot,
             ).exists()
 
+            # Para hoje, não oferece horários que já começaram ou passaram.
+            if data_consulta == timezone.localdate():
+                agora = timezone.localtime().replace(tzinfo=None).time()
+                if inicio_slot <= agora:
+                    conflita = True
+
             if not conflita:
                 slots_livres.append(inicio_slot.strftime("%H:%M"))
-
             atual += passo
 
         return Response(
             {
-                "barbeiro_id": int(barbeiro_id) if str(barbeiro_id).isdigit() else barbeiro_id,
+                "barbeiro_id": barbeiro_id_int,
                 "data": data_consulta.isoformat(),
                 "horarios_disponiveis": slots_livres,
             },
@@ -80,65 +105,101 @@ class HorariosDisponiveisView(APIView):
 
 
 class AgendamentoListCreateView(APIView):
-    """GET/POST /api/agendamentos/: Lista conforme o papel e cria reserva com validacoes."""
+    """GET/POST /api/agendamentos/: lista por papel e cria reservas."""
 
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         user = request.user
 
-        if _eh_admin(user):
-            queryset = Agendamento.objects.select_related(
-                "cliente", "barbeiro", "servico"
-            ).order_by("data", "horario_inicio")
-        else:
-            queryset = (
-                Agendamento.objects.select_related("cliente", "barbeiro", "servico")
-                .filter(
-                    Q(cliente__user=user)
-                    | Q(cliente__usuario=user)
-                    | Q(barbeiro__user=user)
-                    | Q(barbeiro__usuario=user)
-                )
-                .distinct()
-                .order_by("data", "horario_inicio")
-            )
+        queryset = Agendamento.objects.select_related(
+            "cliente", "barbeiro", "servico"
+        )
 
-        serializer = AgendamentoSerializer(queryset, many=True, context={"request": request})
+        if _eh_admin(user):
+            pass
+        else:
+            filtros = []
+            try:
+                cliente = user.cliente
+                filtros.append({"cliente": cliente})
+            except Cliente.DoesNotExist:
+                pass
+            try:
+                barbeiro = user.barbeiro
+                filtros.append({"barbeiro": barbeiro})
+            except Barbeiro.DoesNotExist:
+                pass
+
+            if not filtros:
+                return Response([], status=status.HTTP_200_OK)
+
+            from django.db.models import Q
+            condicao = Q()
+            for filtro in filtros:
+                condicao |= Q(**filtro)
+            queryset = queryset.filter(condicao)
+
+        queryset = queryset.order_by("data", "horario_inicio")
+        serializer = AgendamentoSerializer(
+            queryset, many=True, context={"request": request}
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
-        serializer = AgendamentoSerializer(data=request.data, context={"request": request})
+        if not _eh_admin(request.user):
+            try:
+                request.user.cliente
+            except Cliente.DoesNotExist:
+                return Response(
+                    {"detail": "Somente clientes ou administradores podem criar agendamentos."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        serializer = AgendamentoSerializer(
+            data=request.data, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
         agendamento = serializer.save()
-        output = AgendamentoSerializer(agendamento, context={"request": request})
+        output = AgendamentoSerializer(
+            agendamento, context={"request": request}
+        )
         return Response(output.data, status=status.HTTP_201_CREATED)
 
 
 class CancelarAgendamentoView(APIView):
-    """RF09 / RN04: Apenas o cliente dono da reserva ou Admin pode cancelar."""
+    """RF09/RN04: cliente dono ou administrador pode cancelar."""
 
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, pk):
         try:
-            agendamento = Agendamento.objects.select_related("cliente").get(pk=pk)
+            agendamento = Agendamento.objects.select_related("cliente__user").get(pk=pk)
         except Agendamento.DoesNotExist:
             return Response(
-                {"detail": "Agendamento nao encontrado."},
+                {"detail": "Agendamento não encontrado."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        dono_user = _usuario_do_perfil(agendamento.cliente)
-        if not (_eh_admin(request.user) or dono_user == request.user):
+        if not (_eh_admin(request.user) or agendamento.cliente.user_id == request.user.id):
             return Response(
-                {"detail": "Voce nao tem permissao para cancelar este agendamento."},
+                {"detail": "Você não tem permissão para cancelar este agendamento."},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if agendamento.status == Agendamento.Status.CONCLUIDO:
+            return Response(
+                {"detail": "Não é possível cancelar um agendamento concluído."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if agendamento.status == Agendamento.Status.CANCELADO:
+            return Response(
+                {"detail": "Este agendamento já está cancelado."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         agendamento.status = Agendamento.Status.CANCELADO
         agendamento.save(update_fields=["status"])
-
         return Response(
             {"id": agendamento.id, "status": agendamento.status},
             status=status.HTTP_200_OK,
@@ -146,35 +207,39 @@ class CancelarAgendamentoView(APIView):
 
 
 class ConcluirAgendamentoView(APIView):
-    """RF10 / RN05: Apenas barbeiro responsavel ou Admin conclui; bloqueia se cancelado."""
+    """RF10/RN05: barbeiro responsável ou administrador conclui."""
 
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, pk):
         try:
-            agendamento = Agendamento.objects.select_related("barbeiro").get(pk=pk)
+            agendamento = Agendamento.objects.select_related("barbeiro__user").get(pk=pk)
         except Agendamento.DoesNotExist:
             return Response(
-                {"detail": "Agendamento nao encontrado."},
+                {"detail": "Agendamento não encontrado."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        barbeiro_user = _usuario_do_perfil(agendamento.barbeiro)
-        if not (_eh_admin(request.user) or barbeiro_user == request.user):
+        barbeiro_user_id = agendamento.barbeiro.user_id
+        if not (_eh_admin(request.user) or barbeiro_user_id == request.user.id):
             return Response(
-                {"detail": "Voce nao tem permissao para concluir este agendamento."},
+                {"detail": "Você não tem permissão para concluir este agendamento."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         if agendamento.status == Agendamento.Status.CANCELADO:
             return Response(
-                {"detail": "Nao e possivel concluir um agendamento cancelado."},
+                {"detail": "Não é possível concluir um agendamento cancelado."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if agendamento.status == Agendamento.Status.CONCLUIDO:
+            return Response(
+                {"detail": "Este agendamento já está concluído."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         agendamento.status = Agendamento.Status.CONCLUIDO
         agendamento.save(update_fields=["status"])
-
         return Response(
             {"id": agendamento.id, "status": agendamento.status},
             status=status.HTTP_200_OK,
