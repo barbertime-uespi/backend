@@ -73,7 +73,7 @@ class AgendamentoTests(APITestCase):
             status=Agendamento.Status.AGENDADO,
         )
 
-        url = reverse("agendamentos:agendamento-list")
+        url = "/api/agendamentos/"
         payload = {
             "cliente": self.cliente.id,
             "barbeiro": self.barbeiro.id,
