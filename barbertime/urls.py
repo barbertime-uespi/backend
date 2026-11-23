@@ -22,7 +22,7 @@ urlpatterns = [
     path('api/token/logout/', LogoutView.as_view(), name='token_logout'),
 
     # Rotas dos apps (serão preenchidas nas próximas etapas)
-    path('api/', include('usuarios.urls')),
+path('api/', include('usuarios.urls')),
     path('api/', include('servicos.urls')),
-    path('api/', include('agendamentos.urls')),
+    path('api/agendamentos/', include('agendamentos.urls')),
 ]
